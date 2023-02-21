@@ -243,6 +243,94 @@ impl Index {
     })
   }
 
+  pub(crate) fn init_db(rpc_url: String, auth: Auth, db_file: &PathBuf, chain: Chain) -> Result<Self> {
+    let client = Client::new(&rpc_url, auth.clone()).context("failed to connect to RPC URL")?;
+
+    let database = match unsafe { Database::builder().open_mmapped(db_file.to_path_buf()) } {
+      Ok(database) => {
+        let schema_version = database
+          .begin_read()?
+          .open_table(STATISTIC_TO_COUNT)?
+          .get(&Statistic::Schema.key())?
+          .map(|x| x.value())
+          .unwrap_or(0);
+
+        match schema_version.cmp(&SCHEMA_VERSION) {
+          cmp::Ordering::Less =>
+            bail!(
+              "index at `{}` appears to have been built with an older, incompatible version of ord, consider deleting and rebuilding the index: index schema {schema_version}, ord schema {SCHEMA_VERSION}",
+              db_file.display()
+            ),
+          cmp::Ordering::Greater =>
+            bail!(
+              "index at `{}` appears to have been built with a newer, incompatible version of ord, consider updating ord: index schema {schema_version}, ord schema {SCHEMA_VERSION}",
+              db_file.display()
+            ),
+          cmp::Ordering::Equal => {
+          }
+        }
+
+        database
+      }
+      Err(redb::Error::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
+        let database = unsafe {
+          Database::builder()
+            .set_write_strategy(if cfg!(test) {
+              WriteStrategy::Checksum
+            } else {
+              WriteStrategy::TwoPhase
+            })
+            .create_mmapped(&db_file)?
+        };
+        let tx = database.begin_write()?;
+
+        #[cfg(test)]
+        let tx = {
+          let mut tx = tx;
+          tx.set_durability(redb::Durability::None);
+          tx
+        };
+
+        tx.open_table(HEIGHT_TO_BLOCK_HASH)?;
+        tx.open_table(INSCRIPTION_ID_TO_INSCRIPTION_ENTRY)?;
+        tx.open_table(INSCRIPTION_ID_TO_SATPOINT)?;
+        tx.open_table(INSCRIPTION_NUMBER_TO_INSCRIPTION_ID)?;
+        tx.open_table(OUTPOINT_TO_VALUE)?;
+        tx.open_table(SATPOINT_TO_INSCRIPTION_ID)?;
+        tx.open_table(SAT_TO_INSCRIPTION_ID)?;
+        tx.open_table(SAT_TO_SATPOINT)?;
+        tx.open_table(WRITE_TRANSACTION_STARTING_BLOCK_COUNT_TO_TIMESTAMP)?;
+
+        tx.open_table(STATISTIC_TO_COUNT)?
+          .insert(&Statistic::Schema.key(), &SCHEMA_VERSION)?;
+
+        tx.open_table(OUTPOINT_TO_SAT_RANGES)?
+          .insert(&OutPoint::null().store(), [].as_slice())?;
+
+        tx.commit()?;
+
+        database
+      }
+      Err(error) => return Err(error.into()),
+    };
+
+    let genesis_block_coinbase_transaction =
+      chain.genesis_block().coinbase().unwrap().clone();
+
+    Ok(Self {
+      genesis_block_coinbase_txid: genesis_block_coinbase_transaction.txid(),
+      auth,
+      client,
+      database,
+      path: db_file.to_path_buf(),
+      first_inscription_height: chain.first_inscription_height(),
+      genesis_block_coinbase_transaction,
+      height_limit: Some(u64::MAX),
+      reorged: AtomicBool::new(false),
+      rpc_url,
+    })
+  }
+
   pub(crate) fn get_unspent_outputs(&self, _wallet: Wallet) -> Result<BTreeMap<OutPoint, Amount>> {
     let mut utxos = BTreeMap::new();
     utxos.extend(

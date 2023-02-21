@@ -46,6 +46,7 @@ use {
   derive_more::{Display, FromStr},
   html_escaper::{Escape, Trusted},
   lazy_static::lazy_static,
+  pyo3::prelude::{pymodule, wrap_pyfunction, PyModule, PyResult, Python},
   regex::Regex,
   serde::{Deserialize, Deserializer, Serialize, Serializer},
   std::{
@@ -94,6 +95,7 @@ macro_rules! tprintln {
     };
 }
 
+pub mod api;
 mod arguments;
 mod blocktime;
 mod chain;
@@ -139,6 +141,22 @@ fn integration_test() -> bool {
 
 fn timestamp(seconds: u32) -> DateTime<Utc> {
   Utc.timestamp_opt(seconds.into(), 0).unwrap()
+}
+
+/**
+ * This combines all the functions into a python module
+ */
+#[pymodule]
+fn ord(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+  m.add_function(wrap_pyfunction!(api::init_db, m)?)?;
+  // m.add_function(wrap_pyfunction!(api::get_inscription, m)?)?;
+  m.add_function(wrap_pyfunction!(api::get_block_count, m)?)?;
+  m.add_function(wrap_pyfunction!(api::index_blockchain, m)?)?;
+  m.add_function(wrap_pyfunction!(api::get_block_from_hash, m)?)?;
+  m.add_function(wrap_pyfunction!(api::get_block_from_height, m)?)?;
+  m.add_function(wrap_pyfunction!(api::get_latest_inscriptions, m)?)?;
+  m.add_function(wrap_pyfunction!(subcommand::supply::print_supply, m)?)?;
+  return Ok(());
 }
 
 pub fn main() {

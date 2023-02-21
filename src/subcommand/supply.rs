@@ -1,4 +1,5 @@
 use super::*;
+use pyo3::prelude::pyfunction;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Output {
@@ -26,4 +27,24 @@ pub(crate) fn run() -> Result {
   })?;
 
   Ok(())
+}
+
+#[pyfunction]
+pub(crate) fn print_supply() {
+  let mut last = 0;
+
+  loop {
+    if Height(last + 1).subsidy() == 0 {
+      break;
+    }
+    last += 1;
+  }
+
+  print_json(Output {
+    supply: Sat::SUPPLY,
+    first: 0,
+    last: Sat::SUPPLY - 1,
+    last_mined_in_block: last,
+  })
+  .unwrap();
 }
