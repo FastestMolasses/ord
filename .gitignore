@@ -11,3 +11,5 @@
 /test-times.txt
 /tmp
 index.db
+index_half.db
+local.db

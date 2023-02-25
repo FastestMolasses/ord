@@ -406,6 +406,10 @@ impl Index {
     Ok(())
   }
 
+  fn is_debug(&self) -> bool {
+    self.path.ends_with("local.db")
+  }
+
   pub(crate) fn info(&self) -> Result<Info> {
     let wtx = self.begin_write()?;
 
